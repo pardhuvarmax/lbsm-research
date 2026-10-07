@@ -3,8 +3,9 @@
 import numpy as np
 import pytest
 
-from src.simulation.agent import AdaptiveAgent
+from src.simulation.agent import AdaptiveAgent, make_agent_pool
 from src.simulation.behavior_profiles import (
+    BEHAVIOR_PROFILES,
     PROFILE_NAMES,
     TELEMETRY_FEATURES,
 )
@@ -96,3 +97,53 @@ def test_stationary_distribution():
 
     assert np.allclose(pi.sum(), 1.0)
     assert (pi >= 0).all()
+
+
+# ---------------------------------------------------------------------------
+# Distributional correctness: emitted telemetry vs. the profile it was
+# emitted under. Guards against AR(1) state leaking across regime
+# transitions (each regime's realized mean/std should track its configured
+# BehaviorProfile, not be inflated by the previous regime's carryover).
+# ---------------------------------------------------------------------------
+
+def test_emission_matches_profile_per_regime():
+
+    agents = make_agent_pool(20, base_seed=42)
+    for agent in agents:
+        agent.simulate(2000)
+
+    import pandas as pd
+
+    df = pd.concat([agent.history for agent in agents], ignore_index=True)
+
+    print("\n=== REALIZED VS CONFIGURED PER REGIME ===")
+
+    for state in PROFILE_NAMES:
+        sub = df[df["hidden_state"] == state]
+        profile = BEHAVIOR_PROFILES[state]
+
+        assert len(sub) > 100, f"too few samples in regime {state!r} to check"
+
+        for i, feat in enumerate(TELEMETRY_FEATURES):
+            realized_mean = sub[feat].mean()
+            realized_std = sub[feat].std()
+            cfg_mean = profile.means[i]
+            cfg_std = profile.stds[i]
+
+            print(
+                f"{state:12s} {feat:13s} "
+                f"mean cfg={cfg_mean:8.3f} realized={realized_mean:8.3f}  "
+                f"std cfg={cfg_std:8.3f} realized={realized_std:8.3f}"
+            )
+
+            # Realized mean within a few configured std's of the true mean,
+            # and realized std within 2x the configured std (loose bounds —
+            # this is a leak detector, not a precise distributional test).
+            assert abs(realized_mean - cfg_mean) < 3 * cfg_std, (
+                f"{state}/{feat}: realized mean {realized_mean:.3f} too far "
+                f"from configured {cfg_mean:.3f} (possible AR(1) carryover leak)"
+            )
+            assert realized_std < 2 * cfg_std, (
+                f"{state}/{feat}: realized std {realized_std:.3f} more than "
+                f"2x configured {cfg_std:.3f} (possible AR(1) carryover leak)"
+            )

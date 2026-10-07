@@ -180,7 +180,12 @@ class AdaptiveAgent:
         self._history.append(record)
 
         # 3. Stochastic state transition (for *next* step)
+        prev_state_idx = self._state_idx
         self._transition()
+        if self._state_idx != prev_state_idx:
+            # Don't let the outgoing regime's emission leak into the
+            # incoming regime's AR(1) seed.
+            self._prev_telemetry = None
 
         return record
 

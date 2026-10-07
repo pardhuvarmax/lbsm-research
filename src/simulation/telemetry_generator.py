@@ -244,7 +244,11 @@ class TelemetryGenerator:
                     "mean_reward":    grp["reward"].mean(),
                     "mean_error":     grp["error_rate"].mean(),
                     "mean_latency":   grp["latency"].mean(),
-                    "n_transitions":  (grp["hidden_state"] != grp["hidden_state"].shift()).sum(),
+                    # .shift() leaves the first row NaN, and NaN != anything is
+                    # True, so counting from row 0 overcounts every agent's
+                    # transitions by exactly one (a phantom transition into the
+                    # first timestep). Compare consecutive pairs directly instead.
+                    "n_transitions": int((grp["hidden_state"].values[:-1] != grp["hidden_state"].values[1:]).sum()),
                 }
             )
         return pd.DataFrame(rows).set_index("agent_id")

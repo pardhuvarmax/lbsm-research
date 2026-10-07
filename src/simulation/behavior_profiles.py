@@ -54,8 +54,9 @@ class BehaviorProfile:
         Expected value of each telemetry feature under this regime.
     stds : np.ndarray   shape (N_FEATURES,)
         Standard deviation of each telemetry feature.
-    autocorr : float
-        AR(1) autocorrelation coefficient for temporal smoothing (ρ ∈ [0, 1)).
+    autocorr : float | np.ndarray
+        AR(1) autocorrelation coefficient(s) for temporal smoothing (ρ ∈ [0, 1)),
+        one per feature (broadcast from a scalar if a single float is given).
         Higher → smoother trajectories within the regime.
     description : str
         Plain-language characterisation (used in paper figures / captions).
@@ -66,9 +67,14 @@ class BehaviorProfile:
     name: str
     means: np.ndarray
     stds: np.ndarray
-    autocorr: float = 0.3
+    autocorr: np.ndarray = field(default_factory=lambda: np.full(6, 0.3))
     description: str = ""
     color: str = "#333333"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "autocorr", np.broadcast_to(np.asarray(self.autocorr, dtype=np.float64), (N_FEATURES,)).copy()
+        )
 
     # ------------------------------------------------------------------ #
     # Derived helpers
@@ -100,8 +106,8 @@ class BehaviorProfile:
         x_prev = prev if prev is not None else self.means.copy()
 
         for t in range(n):
-            x_uncorr = self.means + self.stds * noise[t]
-            x_ar1 = self.autocorr * x_prev + (1.0 - self.autocorr) * x_uncorr
+            eps = self.stds * noise[t]
+            x_ar1 = self.autocorr * x_prev + (1.0 - self.autocorr) * self.means + eps
             # Clip physically impossible values
             x_ar1 = np.clip(x_ar1, a_min=_FEATURE_LOWER_BOUNDS, a_max=_FEATURE_UPPER_BOUNDS)
             samples[t] = x_ar1
